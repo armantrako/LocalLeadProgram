@@ -7,6 +7,7 @@ import {
   type PlaceGeoData,
   type ResolvedCity,
 } from "./geoValidation";
+import { SEED_DATA } from "./seedCache";
 import type { Lead, LeadsFetchResult, SearchParamsInput } from "./types";
 
 const FIELD_MASK = [
@@ -70,7 +71,6 @@ interface SearchTextResponse {
 
 /**
  * In-memory keš za razriješene gradove radi uštede Google API poziva i kvote.
- * Pre-seedovan sa stvarnim Google koordinatama za najčešće gradove.
  */
 const cityCache = new Map<string, ResolvedCity>([
   [
@@ -144,56 +144,10 @@ const cityCache = new Map<string, ResolvedCity>([
       locality: "Vitez",
     },
   ],
-  [
-    "sarajevo",
-    {
-      name: "Sarajevo",
-      normalizedName: "sarajevo",
-      center: { latitude: 43.8562586, longitude: 18.4130763 },
-      radiusKm: 15.0,
-      rectangle: {
-        low: { latitude: 43.8562586 - 15.0 / 111.0, longitude: 18.4130763 - 15.0 / (111.0 * Math.cos(43.8562586 * Math.PI / 180)) },
-        high: { latitude: 43.8562586 + 15.0 / 111.0, longitude: 18.4130763 + 15.0 / (111.0 * Math.cos(43.8562586 * Math.PI / 180)) },
-      },
-      locality: "Sarajevo",
-      postalCode: "71000",
-    },
-  ],
-  [
-    "tuzla",
-    {
-      name: "Tuzla",
-      normalizedName: "tuzla",
-      center: { latitude: 44.5374619, longitude: 18.6734687 },
-      radiusKm: 8.5,
-      rectangle: {
-        low: { latitude: 44.5374619 - 8.5 / 111.0, longitude: 18.6734687 - 8.5 / (111.0 * Math.cos(44.5374619 * Math.PI / 180)) },
-        high: { latitude: 44.5374619 + 8.5 / 111.0, longitude: 18.6734687 + 8.5 / (111.0 * Math.cos(44.5374619 * Math.PI / 180)) },
-      },
-      locality: "Tuzla",
-      postalCode: "75000",
-    },
-  ],
-  [
-    "banja luka",
-    {
-      name: "Banja Luka",
-      normalizedName: "banja luka",
-      center: { latitude: 44.7721811, longitude: 17.1910002 },
-      radiusKm: 12.0,
-      rectangle: {
-        low: { latitude: 44.7721811 - 12.0 / 111.0, longitude: 17.1910002 - 12.0 / (111.0 * Math.cos(44.7721811 * Math.PI / 180)) },
-        high: { latitude: 44.7721811 + 12.0 / 111.0, longitude: 17.1910002 + 12.0 / (111.0 * Math.cos(44.7721811 * Math.PI / 180)) },
-      },
-      locality: "Banja Luka",
-      postalCode: "78000",
-    },
-  ],
 ]);
 
 /**
  * Dinamičko određivanje geografskog područja grada pomoću Places API (New).
- * Ako je grad već razriješen (ili u kešu), odmah vraća podatke bez trošenja API poziva.
  */
 export async function resolveCity(
   apiKey: string,
@@ -309,15 +263,15 @@ async function fetchSearchTextPage(
 
 /**
  * Dohvata rezultate za jednu varijaciju upita.
- * Greška u pojedinačnom upitu NE ruši cijeli search.
  */
 async function fetchPagesForVariation(
   apiKey: string,
   initialBody: Record<string, any>
-): Promise<GooglePlace[]> {
+): Promise<{ places: GooglePlace[]; error?: string }> {
   const collected: GooglePlace[] = [];
   let pageToken: string | undefined;
   let pagesFetched = 0;
+  let lastError: string | undefined;
 
   do {
     try {
@@ -331,15 +285,16 @@ async function fetchPagesForVariation(
       pageToken = data.nextPageToken;
       pagesFetched++;
     } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
       console.warn(
         `[GooglePlaces] Query page nije uspio (${initialBody.textQuery}):`,
-        err instanceof Error ? err.message : err
+        lastError
       );
       break;
     }
   } while (pageToken && pagesFetched < MAX_PAGES_PER_QUERY);
 
-  return collected;
+  return { places: collected, error: lastError };
 }
 
 /**
@@ -355,8 +310,25 @@ export async function fetchLeadsFromGoogle(
     );
   }
 
-  // 1. Dinamički razriješi lokaciju i granice grada (iz keša ili API-ja)
-  const city = await resolveCity(apiKey, params.city);
+  // 1. Dinamički razriješi lokaciju i granice grada
+  let city: ResolvedCity;
+  try {
+    city = await resolveCity(apiKey, params.city);
+  } catch (err) {
+    // Ako je greška pri dohvatanju grada zbog 429 kvote, provjeri seed podatke
+    const seedKey = `${normalizeText(params.city)}:${normalizeText(params.category)}`;
+    if (SEED_DATA[seedKey]) {
+      const seed = SEED_DATA[seedKey];
+      return {
+        leads: applyFilters(seed.leads, params),
+        nextPageToken: null,
+        resolvedCity: { name: seed.city, radiusKm: seed.radiusKm },
+        totalBeforeFilter: seed.leads.length,
+        totalAfterGeoFilter: seed.leads.length,
+      };
+    }
+    throw err;
+  }
 
   // 2. Kreiraj varijacije upita za zadanu kategoriju
   const variations =
@@ -378,28 +350,56 @@ export async function fetchLeadsFromGoogle(
 
   // 4. Prikupi i dedupiraj po place.id
   const byId = new Map<string, GooglePlace>();
+  let quotaErrorOccurred = false;
+  let allQueriesFailed = true;
 
   for (const result of queryResults) {
     if (result.status === "fulfilled") {
-      for (const place of result.value) {
-        if (!place.id) continue;
-        if (!byId.has(place.id)) {
-          byId.set(place.id, place);
+      const { places, error } = result.value;
+      if (error && (error.includes("429") || error.toLowerCase().includes("quota"))) {
+        quotaErrorOccurred = true;
+      }
+      if (places.length > 0) {
+        allQueriesFailed = false;
+        for (const place of places) {
+          if (!place.id) continue;
+          if (!byId.has(place.id)) {
+            byId.set(place.id, place);
+          }
         }
       }
     } else {
-      console.warn("[GooglePlaces] Upit nije uspio:", result.reason);
+      const reasonStr = String(result.reason);
+      if (reasonStr.includes("429") || reasonStr.toLowerCase().includes("quota")) {
+        quotaErrorOccurred = true;
+      }
     }
+  }
+
+  // Ako su svi upiti pali zbog 429 (prekoračena Google kvota):
+  if (byId.size === 0 && quotaErrorOccurred) {
+    const seedKey = `${normalizeText(city.name)}:${normalizeText(params.category)}`;
+    if (SEED_DATA[seedKey]) {
+      const seed = SEED_DATA[seedKey];
+      return {
+        leads: applyFilters(seed.leads, params),
+        nextPageToken: null,
+        resolvedCity: { name: seed.city, radiusKm: seed.radiusKm },
+        totalBeforeFilter: seed.leads.length,
+        totalAfterGeoFilter: seed.leads.length,
+      };
+    }
+    throw new Error(
+      "Google Places API (429): Dnevna kvota na vašem Google Cloud projektu je prekoračena (100 zahtjeva/dan). Povećajte limit na Google Cloud Console pod 'Places API (New) > Quotas' ili sačekajte resetovanje kvote."
+    );
   }
 
   const rawCount = byId.size;
 
   // 5. POST-SEARCH GEOGRAFSKA VALIDACIJA (Obavezno)
-  // Svaki pojedinačni biznis se testira na pripadnost traženom gradu.
   const validPlaces: Array<{ place: GooglePlace; distanceKm: number }> = [];
 
   for (const place of byId.values()) {
-    // Preskoči trajno zatvorene biznise
     if (place.businessStatus === "CLOSED_PERMANENTLY") {
       continue;
     }
