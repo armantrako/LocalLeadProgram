@@ -1,5 +1,5 @@
 import { calculateLeadScore } from "./leadScore";
-import { applyFilters } from "./mockData";
+import { applyFilters } from "./filters";
 import {
   haversineDistanceKm,
   normalizeText,
@@ -7,7 +7,6 @@ import {
   type PlaceGeoData,
   type ResolvedCity,
 } from "./geoValidation";
-import { SEED_DATA } from "./seedCache";
 import type { Lead, LeadsFetchResult, SearchParamsInput } from "./types";
 
 const FIELD_MASK = [
@@ -28,24 +27,24 @@ const FIELD_MASK = [
 ].join(",");
 
 /**
- * Optimizovane varijacije upita za maksimalnu pokrivenost uz minimalnu potrošnju API kvote.
- * Koriste se 2-3 fokusirane fraze po kategoriji (kombinacija engleskog i lokalnog naziva).
+ * Optimizovane varijacije upita za maksimalnu pokrivenost uz kontrolisanu potrošnju API-ja.
+ * Kombinacija engleskih i domaćih termina garantuje pronalazak lokalnih biznisa.
  */
 const CATEGORY_QUERY_VARIATIONS: Record<string, string[]> = {
-  Restaurants: ["restaurants", "pizzeria", "ćevabdžinica grill"],
-  Hotels: ["hotels", "motels apartmani"],
+  Restaurants: ["restaurants", "pizzeria", "grill ćevabdžinica"],
+  Hotels: ["hotels", "hotel accommodation", "prenoćište apartmani"],
   Motels: ["motels", "motel prenoćište"],
-  "Auto dealerships": ["auto dealership", "car dealership auto salon"],
-  "Auto services": ["auto service", "auto repair autoservis"],
-  "Wedding venues": ["wedding venues", "svadbeni salon"],
-  Cafes: ["cafes", "coffee shop caffe bar"],
-  "Hair salons": ["hair salon", "frizerski salon barber"],
-  "Beauty salons": ["beauty salon", "kozmetički salon ljepote"],
+  "Auto dealerships": ["auto dealership", "car dealership auto salon", "prodaja vozila"],
+  "Auto services": ["auto service", "auto repair autoservis", "vulkanizer"],
+  "Wedding venues": ["wedding venues", "svadbeni salon", "sala za vjenčanja"],
+  Cafes: ["cafes", "coffee shop caffe bar", "kafana"],
+  "Hair salons": ["hair salon", "frizerski salon", "barber shop"],
+  "Beauty salons": ["beauty salon", "kozmetički salon", "salon ljepote"],
   Dentists: ["dentist dental clinic", "stomatolog ordinacija"],
   Gyms: ["gym fitness center", "teretana klub"],
 };
 
-// Početna pretraga uzima prvu stranicu (~20 rezultata po varijaciji = 40-60 potencijalnih biznisa)
+// Broj stranica po varijaciji (1 stranica = ~20 rezultata po varijaciji)
 const MAX_PAGES_PER_QUERY = 1;
 
 interface GooglePlace extends PlaceGeoData {
@@ -70,84 +69,18 @@ interface SearchTextResponse {
 }
 
 /**
- * In-memory keš za razriješene gradove radi uštede Google API poziva i kvote.
+ * In-memory keš za geografske koordinate gradova radi smanjenja nepotrebnih API poziva
  */
-const cityCache = new Map<string, ResolvedCity>([
-  [
-    "visoko",
-    {
-      name: "Visoko",
-      normalizedName: "visoko",
-      center: { latitude: 43.9927272, longitude: 18.1771446 },
-      radiusKm: 6.0,
-      rectangle: {
-        low: { latitude: 43.93867314684685, longitude: 18.101740620888998 },
-        high: { latitude: 44.04678125315315, longitude: 18.252548579111 },
-      },
-      locality: "Visoko",
-    },
-  ],
-  [
-    "travnik",
-    {
-      name: "Travnik",
-      normalizedName: "travnik",
-      center: { latitude: 44.2260825, longitude: 17.6644834 },
-      radiusKm: 6.0,
-      rectangle: {
-        low: { latitude: 44.2260825 - 6.0 / 111.0, longitude: 17.6644834 - 6.0 / (111.0 * Math.cos(44.2260825 * Math.PI / 180)) },
-        high: { latitude: 44.2260825 + 6.0 / 111.0, longitude: 17.6644834 + 6.0 / (111.0 * Math.cos(44.2260825 * Math.PI / 180)) },
-      },
-      locality: "Travnik",
-    },
-  ],
-  [
-    "zenica",
-    {
-      name: "Zenica",
-      normalizedName: "zenica",
-      center: { latitude: 44.2034846, longitude: 17.9076428 },
-      radiusKm: 9.9,
-      rectangle: {
-        low: { latitude: 44.2034846 - 9.9 / 111.0, longitude: 17.9076428 - 9.9 / (111.0 * Math.cos(44.2034846 * Math.PI / 180)) },
-        high: { latitude: 44.2034846 + 9.9 / 111.0, longitude: 17.9076428 + 9.9 / (111.0 * Math.cos(44.2034846 * Math.PI / 180)) },
-      },
-      locality: "Zenica",
-    },
-  ],
-  [
-    "mostar",
-    {
-      name: "Mostar",
-      normalizedName: "mostar",
-      center: { latitude: 43.3437748, longitude: 17.8077578 },
-      radiusKm: 6.7,
-      rectangle: {
-        low: { latitude: 43.3437748 - 6.7 / 111.0, longitude: 17.8077578 - 6.7 / (111.0 * Math.cos(43.3437748 * Math.PI / 180)) },
-        high: { latitude: 43.3437748 + 6.7 / 111.0, longitude: 17.8077578 + 6.7 / (111.0 * Math.cos(43.3437748 * Math.PI / 180)) },
-      },
-      locality: "Mostar",
-      postalCode: "88000",
-    },
-  ],
-  [
-    "vitez",
-    {
-      name: "Vitez",
-      normalizedName: "vitez",
-      center: { latitude: 44.1515767, longitude: 17.793535 },
-      radiusKm: 6.0,
-      rectangle: {
-        low: { latitude: 44.1515767 - 6.0 / 111.0, longitude: 17.793535 - 6.0 / (111.0 * Math.cos(44.1515767 * Math.PI / 180)) },
-        high: { latitude: 44.1515767 + 6.0 / 111.0, longitude: 17.793535 + 6.0 / (111.0 * Math.cos(44.1515767 * Math.PI / 180)) },
-      },
-      locality: "Vitez",
-    },
-  ],
-]);
+const cityCache = new Map<string, ResolvedCity>();
 
 /**
- * Dinamičko određivanje geografskog područja grada pomoću Places API (New).
+ * In-memory sesijski keš za pretrage (5 minuta) radi uštede API poziva
+ */
+const searchResultsCache = new Map<string, { data: LeadsFetchResult; timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Dinamičko određivanje lokacije grada pomoću Google Places API (New).
  */
 export async function resolveCity(
   apiKey: string,
@@ -196,6 +129,7 @@ export async function resolveCity(
       viewport.high.latitude,
       viewport.high.longitude
     );
+    // Sigurnosni faktor (1.35x) za industrijske i prigradske zone (min 6km, max 22km)
     radiusKm = Math.min(22.0, Math.max(6.0, dCorner * 1.35));
   }
 
@@ -254,7 +188,7 @@ async function fetchSearchTextPage(
 
   if (!response.ok) {
     const errBody = await response.text();
-    console.warn(`[GooglePlaces] SearchText status ${response.status}: ${errBody}`);
+    console.warn(`[GooglePlaces] SearchText error status ${response.status}: ${errBody}`);
     throw new Error(`Google Places API error (${response.status}): ${errBody}`);
   }
 
@@ -287,7 +221,7 @@ async function fetchPagesForVariation(
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
       console.warn(
-        `[GooglePlaces] Query page nije uspio (${initialBody.textQuery}):`,
+        `[GooglePlaces] Query nije uspio (${initialBody.textQuery}):`,
         lastError
       );
       break;
@@ -310,25 +244,15 @@ export async function fetchLeadsFromGoogle(
     );
   }
 
-  // 1. Dinamički razriješi lokaciju i granice grada
-  let city: ResolvedCity;
-  try {
-    city = await resolveCity(apiKey, params.city);
-  } catch (err) {
-    // Ako je greška pri dohvatanju grada zbog 429 kvote, provjeri seed podatke
-    const seedKey = `${normalizeText(params.city)}:${normalizeText(params.category)}`;
-    if (SEED_DATA[seedKey]) {
-      const seed = SEED_DATA[seedKey];
-      return {
-        leads: applyFilters(seed.leads, params),
-        nextPageToken: null,
-        resolvedCity: { name: seed.city, radiusKm: seed.radiusKm },
-        totalBeforeFilter: seed.leads.length,
-        totalAfterGeoFilter: seed.leads.length,
-      };
-    }
-    throw err;
+  // Provjeri sesijski keš
+  const cacheKey = `${normalizeText(params.city)}:${normalizeText(params.category)}:${params.minRating}:${params.minReviews}:${params.websiteFilter}`;
+  const cached = searchResultsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
   }
+
+  // 1. Dinamički razriješi lokaciju i granice grada
+  const city = await resolveCity(apiKey, params.city);
 
   // 2. Kreiraj varijacije upita za zadanu kategoriju
   const variations =
@@ -376,30 +300,21 @@ export async function fetchLeadsFromGoogle(
     }
   }
 
-  // Ako su svi upiti pali zbog 429 (prekoračena Google kvota):
+  // Ako su svi upiti pali zbog 429 greške kvote
   if (byId.size === 0 && quotaErrorOccurred) {
-    const seedKey = `${normalizeText(city.name)}:${normalizeText(params.category)}`;
-    if (SEED_DATA[seedKey]) {
-      const seed = SEED_DATA[seedKey];
-      return {
-        leads: applyFilters(seed.leads, params),
-        nextPageToken: null,
-        resolvedCity: { name: seed.city, radiusKm: seed.radiusKm },
-        totalBeforeFilter: seed.leads.length,
-        totalAfterGeoFilter: seed.leads.length,
-      };
-    }
     throw new Error(
-      "Google Places API (429): Dnevna kvota na vašem Google Cloud projektu je prekoračena (100 zahtjeva/dan). Povećajte limit na Google Cloud Console pod 'Places API (New) > Quotas' ili sačekajte resetovanje kvote."
+      "Google Places API (429): Dnevna kvota na vašem Google Cloud projektu je prekoračena. Povećajte 'SearchTextRequest per day' limit na Google Cloud Console (APIs & Services > Places API (New) > Quotas) ili sačekajte resetovanje."
     );
   }
 
   const rawCount = byId.size;
 
   // 5. POST-SEARCH GEOGRAFSKA VALIDACIJA (Obavezno)
+  // Svaki pojedinačni biznis se testira na pripadnost traženom gradu.
   const validPlaces: Array<{ place: GooglePlace; distanceKm: number }> = [];
 
   for (const place of byId.values()) {
+    // Preskoči trajno zatvorene biznise
     if (place.businessStatus === "CLOSED_PERMANENTLY") {
       continue;
     }
@@ -454,7 +369,7 @@ export async function fetchLeadsFromGoogle(
   // 7. Primjena korisničkih filtera (minRating, minReviews, websiteFilter)
   const filteredLeads = applyFilters(leads, params);
 
-  return {
+  const finalResult: LeadsFetchResult = {
     leads: filteredLeads,
     nextPageToken: null,
     resolvedCity: {
@@ -464,4 +379,9 @@ export async function fetchLeadsFromGoogle(
     totalBeforeFilter: rawCount,
     totalAfterGeoFilter,
   };
+
+  // Spremi u sesijski keš
+  searchResultsCache.set(cacheKey, { data: finalResult, timestamp: Date.now() });
+
+  return finalResult;
 }

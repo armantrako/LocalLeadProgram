@@ -1,5 +1,7 @@
 import { calculateLeadScore } from "./leadScore";
+import { applyFilters } from "./filters";
 import type { Lead, SearchParamsInput } from "./types";
+export { applyFilters };
 
 const NAME_PARTS: Record<string, string[]> = {
   Restaurants: ["Restoran Bosna", "Kod Ćire", "Stari Grad Grill", "Pod Lipom", "Aščinica Zlatna Ribica"],
@@ -68,25 +70,3 @@ export function generateMockLeads(params: SearchParamsInput): Lead[] {
   return applyFilters(leads, params);
 }
 
-/**
- * Primjenjuje filtere za rating, recenzije i postojanje web stranice na stvarne podatke.
- */
-export function applyFilters(leads: Lead[], params: SearchParamsInput): Lead[] {
-  return leads.filter((lead) => {
-    // Min rating provjera
-    if (params.minRating > 0) {
-      if (lead.rating === null || lead.rating < params.minRating) return false;
-    }
-
-    // Min reviews provjera
-    if (params.minReviews > 0) {
-      if (lead.reviewCount === null || lead.reviewCount < params.minReviews) return false;
-    }
-
-    // Website filter
-    if (params.websiteFilter === "no_website" && lead.website) return false;
-    if (params.websiteFilter === "has_website" && !lead.website) return false;
-
-    return true;
-  });
-}
