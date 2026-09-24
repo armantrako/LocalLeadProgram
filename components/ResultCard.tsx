@@ -44,8 +44,8 @@ export default function ResultCard({ lead }: { lead: Lead }) {
         </div>
 
         <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-muted">
-          <span>⭐ {lead.rating !== null ? lead.rating.toFixed(1) : "Nije dostupno"}</span>
-          <span>💬 {lead.reviewCount !== null ? `${lead.reviewCount} recenzija` : "Nema recenzija"}</span>
+          <span>⭐ {typeof lead.rating === "number" ? lead.rating.toFixed(1) : "Nije dostupno"}</span>
+          <span>💬 {typeof lead.reviewCount === "number" ? `${lead.reviewCount} recenzija` : "Nema recenzija"}</span>
           <span className={lead.website ? "text-green-400 font-medium" : "text-amber-400 font-medium"}>
             {lead.website ? "🌐 Ima website" : "❌ No website"}
           </span>
@@ -53,7 +53,7 @@ export default function ResultCard({ lead }: { lead: Lead }) {
         </div>
 
         <div className="text-xs text-muted/80 bg-bg/50 border border-border/50 rounded-lg px-2.5 py-1.5">
-          {lead.scoreReasons.join(" · ")}
+          {(lead.scoreReasons && lead.scoreReasons.length > 0) ? lead.scoreReasons.join(" · ") : "Nema detalja"}
         </div>
       </div>
 

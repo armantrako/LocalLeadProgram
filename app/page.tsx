@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import FilterForm from "@/components/FilterForm";
 import ResultsList from "@/components/ResultsList";
 import type { Lead, SearchParamsInput } from "@/lib/types";
 
 const DEFAULT_PARAMS: SearchParamsInput = {
-  city: "",
+  city: "Visoko",
   category: "Restaurants",
   minRating: 0,
   minReviews: 0,
@@ -75,6 +75,11 @@ export default function Home() {
       setLoading(false);
     }
   }
+
+  // Automatski učitaj početnu pretragu za Visoko čim se stranica otvori
+  useEffect(() => {
+    handleSearch();
+  }, []);
 
   async function handleLoadMore() {
     if (!nextPageToken) return;
