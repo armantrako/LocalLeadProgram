@@ -1,6 +1,6 @@
 export type WebsiteFilter = "any" | "no_website" | "has_website";
 
-export type SortKey = "score" | "rating" | "reviews" | "name";
+export type SortKey = "score" | "rating" | "reviews" | "name" | "status";
 
 export interface SearchParamsInput {
   city: string;
@@ -9,6 +9,135 @@ export interface SearchParamsInput {
   minReviews: number;
   websiteFilter: WebsiteFilter;
   pageToken?: string;
+}
+
+export type LeadStatus =
+  | "NEW"
+  | "ANALYZING"
+  | "MESSAGE_READY"
+  | "READY_TO_SEND"
+  | "SENT"
+  | "REPLIED"
+  | "INTERESTED"
+  | "NOT_INTERESTED"
+  | "FOLLOW_UP"
+  | "DO_NOT_CONTACT"
+  | "ERROR"
+  | "NOT_ELIGIBLE";
+
+export type ReplyClassification =
+  | "INTERESTED"
+  | "PRICE_REQUEST"
+  | "QUESTION"
+  | "LATER"
+  | "NOT_INTERESTED"
+  | "STOP"
+  | "UNKNOWN";
+
+export interface BusinessAnalysis {
+  whyIdealClient: string;
+  hasWebsite: boolean;
+  websiteAnalysis: string;
+  onlinePresenceQuality: "poor" | "moderate" | "good" | "excellent";
+  websitePotential: string;
+  bestSalesAngle: string;
+  analyzedAt: string;
+}
+
+export interface OutreachMessage {
+  id: string;
+  leadId: string;
+  direction: "outgoing" | "incoming";
+  text: string;
+  templateName?: string;
+  templateVariables?: Record<string, string>;
+  whatsappMessageId?: string;
+  status: "queued" | "sending" | "sent" | "delivered" | "read" | "failed";
+  errorCode?: string;
+  errorMessage?: string;
+  timestamp: string;
+  aiClassification?: ReplyClassification;
+  aiSuggestedResponse?: string;
+}
+
+export interface WhatsAppTemplate {
+  name: string;
+  language: string;
+  category: "MARKETING" | "UTILITY";
+  header?: string;
+  body: string;
+  variables: string[];
+  status: "APPROVED" | "PENDING" | "REJECTED";
+}
+
+export interface AppSettings {
+  // AI Sales Context
+  myName: string;
+  agencyName: string;
+  serviceDescription: string;
+  basePrice: string;
+  maintenancePrice: string;
+  demoUrl: string;
+  phone: string;
+  email: string;
+  targetCities: string[];
+  messageTone: "professional" | "friendly" | "direct";
+
+  // WhatsApp Configuration & Policy
+  whatsappMessageType: "template" | "freeform";
+  activeTemplate: string;
+
+  // Automation & Limits
+  autoOutreachEnabled: boolean;
+  maxDailyOutreach: number;
+  maxHourlyOutreach: number;
+  minDelaySeconds: number;
+  maxFollowups: number;
+  followupDelayDays: number;
+
+  // AI Provider
+  aiProvider: "builtin" | "openai" | "gemini";
+  aiModel: string;
+}
+
+export type AuditAction =
+  | "AI_MESSAGE_GENERATED"
+  | "AI_ANALYSIS_COMPLETED"
+  | "WHATSAPP_SEND_ATTEMPT"
+  | "WHATSAPP_SENT"
+  | "WHATSAPP_FAILED"
+  | "REPLY_RECEIVED"
+  | "REPLY_CLASSIFIED"
+  | "FOLLOWUP_SCHEDULED"
+  | "FOLLOWUP_SENT"
+  | "DO_NOT_CONTACT"
+  | "STATUS_CHANGED"
+  | "ELIGIBILITY_CHECK";
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  leadId: string;
+  businessName: string;
+  action: AuditAction;
+  status: "success" | "warning" | "error" | "info";
+  channel: "whatsapp" | "system" | "ai";
+  messageId?: string;
+  error?: string;
+  details?: string;
+  source: "ai" | "manual" | "webhook" | "cron";
+}
+
+export interface OutreachStats {
+  messagesSent: number;
+  messagesDelivered: number;
+  replies: number;
+  interested: number;
+  notInterested: number;
+  followups: number;
+  errors: number;
+  potentialDeals: number;
+  won: number;
 }
 
 export interface Lead {
@@ -29,6 +158,31 @@ export interface Lead {
   distanceKm?: number | null;
   businessStatus?: string | null;
   types?: string[];
+
+  // Outreach & CRM Fields
+  status?: LeadStatus;
+  city?: string;
+  category?: string;
+  analysis?: BusinessAnalysis | null;
+  generatedMessage?: string | null;
+  selectedTemplate?: string | null;
+  eligibility?: {
+    isEligible: boolean;
+    normalizedPhone: string | null;
+    phoneType: "mobile" | "landline" | "invalid";
+    reason?: string;
+  } | null;
+  lastContactAt?: string | null;
+  nextFollowupAt?: string | null;
+  followupCount?: number;
+  conversation?: OutreachMessage[];
+  doNotContact?: boolean;
+  doNotContactReason?: string | null;
+  lastError?: {
+    code?: string;
+    message: string;
+    timestamp: string;
+  } | null;
 }
 
 export interface LeadsFetchResult {

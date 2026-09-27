@@ -14,6 +14,7 @@ function toCsv(leads: Lead[]): string {
     "website",
     "maps_url",
     "lead_score",
+    "status",
     "distance_km",
   ];
   const rows = leads.map((l) =>
@@ -26,6 +27,7 @@ function toCsv(leads: Lead[]): string {
       l.website ?? "",
       l.mapsUrl ?? "",
       l.leadScore,
+      l.status ?? "NEW",
       typeof l.distanceKm === "number" ? l.distanceKm : "",
     ]
       .map((field) => `"${String(field).replace(/"/g, '""')}"`)
@@ -59,6 +61,12 @@ interface Props {
   } | null;
   totalBeforeFilter?: number;
   totalAfterGeoFilter?: number;
+  onAnalyze?: (lead: Lead) => void;
+  onGenerateMessage?: (lead: Lead) => void;
+  onSendWhatsApp?: (lead: Lead) => void;
+  onViewConversation?: (lead: Lead) => void;
+  onScheduleFollowup?: (lead: Lead) => void;
+  onDoNotContact?: (lead: Lead) => void;
 }
 
 export default function ResultsList({
@@ -69,6 +77,12 @@ export default function ResultsList({
   resolvedCity,
   totalBeforeFilter,
   totalAfterGeoFilter,
+  onAnalyze,
+  onGenerateMessage,
+  onSendWhatsApp,
+  onViewConversation,
+  onScheduleFollowup,
+  onDoNotContact,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
 
@@ -82,6 +96,8 @@ export default function ResultsList({
           return (b.reviewCount ?? -1) - (a.reviewCount ?? -1);
         case "name":
           return a.name.localeCompare(b.name);
+        case "status":
+          return (a.status || "").localeCompare(b.status || "");
         case "score":
         default:
           return b.leadScore - a.leadScore;
@@ -131,6 +147,7 @@ export default function ResultsList({
             <option value="rating">Google ocjena</option>
             <option value="reviews">Broj recenzija</option>
             <option value="name">Naziv biznisa</option>
+            <option value="status">Status leada</option>
           </select>
           <button
             onClick={() => downloadCsv(sorted, resolvedCity?.name)}
@@ -143,7 +160,16 @@ export default function ResultsList({
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {sorted.map((lead) => (
-          <ResultCard key={lead.id} lead={lead} />
+          <ResultCard
+            key={lead.id}
+            lead={lead}
+            onAnalyze={onAnalyze}
+            onGenerateMessage={onGenerateMessage}
+            onSendWhatsApp={onSendWhatsApp}
+            onViewConversation={onViewConversation}
+            onScheduleFollowup={onScheduleFollowup}
+            onDoNotContact={onDoNotContact}
+          />
         ))}
       </div>
 

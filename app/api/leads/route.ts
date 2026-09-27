@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateMockLeads } from "@/lib/mockData";
 import { fetchLeadsFromGoogle } from "@/lib/googlePlaces";
-import type { SearchParamsInput, WebsiteFilter } from "@/lib/types";
+import { getLeadById, isDoNotContact, saveBatchLeads } from "@/lib/storage/store";
+import type { Lead, SearchParamsInput, WebsiteFilter } from "@/lib/types";
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
@@ -34,30 +35,70 @@ export async function GET(req: NextRequest) {
   const mockMode = process.env.MOCK_MODE === "true";
 
   try {
+    let rawLeads: Lead[] = [];
+    let nextPageToken: string | null = null;
+    let resolvedCity: { name: string; radiusKm: number } | undefined;
+    let totalBeforeFilter: number | undefined;
+    let totalAfterGeoFilter: number | undefined;
+
     if (mockMode) {
-      const leads = generateMockLeads(params);
-      return NextResponse.json({
-        leads,
-        mockMode: true,
-        nextPageToken: null,
-        resolvedCity: { name: city, radiusKm: 6.0 },
-      });
+      rawLeads = generateMockLeads(params);
+      resolvedCity = { name: city, radiusKm: 6.0 };
+    } else {
+      const result = await fetchLeadsFromGoogle(params);
+      rawLeads = result.leads;
+      nextPageToken = result.nextPageToken;
+      resolvedCity = result.resolvedCity;
+      totalBeforeFilter = result.totalBeforeFilter;
+      totalAfterGeoFilter = result.totalAfterGeoFilter;
     }
 
-    const result = await fetchLeadsFromGoogle(params);
+    // Obogati svaki lead sa statusom iz interne baze i CRM podacima
+    const enrichedLeads: Lead[] = rawLeads.map((lead) => {
+      const existing = getLeadById(lead.id);
+      const isDnc = isDoNotContact(lead.phone, lead.name) || existing?.doNotContact || false;
+
+      let status = existing?.status || "NEW";
+      if (isDnc) {
+        status = "DO_NOT_CONTACT";
+      }
+
+      return {
+        ...lead,
+        city: lead.city || city,
+        category: lead.category || category,
+        status,
+        doNotContact: isDnc,
+        doNotContactReason: isDnc
+          ? existing?.doNotContactReason || "Broj je na DNC listi"
+          : undefined,
+        analysis: existing?.analysis || null,
+        generatedMessage: existing?.generatedMessage || null,
+        selectedTemplate: existing?.selectedTemplate || null,
+        eligibility: existing?.eligibility || null,
+        lastContactAt: existing?.lastContactAt || null,
+        nextFollowupAt: existing?.nextFollowupAt || null,
+        followupCount: existing?.followupCount || 0,
+        conversation: existing?.conversation || [],
+        lastError: existing?.lastError || null,
+      };
+    });
+
+    // Sačuvaj leadove u repozitorij u pozadini
+    saveBatchLeads(enrichedLeads);
+
     return NextResponse.json({
-      leads: result.leads,
-      mockMode: false,
-      nextPageToken: result.nextPageToken,
-      resolvedCity: result.resolvedCity,
-      totalBeforeFilter: result.totalBeforeFilter,
-      totalAfterGeoFilter: result.totalAfterGeoFilter,
+      leads: enrichedLeads,
+      mockMode,
+      nextPageToken,
+      resolvedCity,
+      totalBeforeFilter,
+      totalAfterGeoFilter,
     });
   } catch (err) {
     const rawMessage = err instanceof Error ? err.message : String(err);
     console.error(`[API /api/leads] Greška za grad "${city}", kategorija "${category}":`, rawMessage);
 
-    // Prilagođene, sigurne poruke za klijenta (bez otkrivanja ključeva)
     if (rawMessage.includes("403") || rawMessage.toLowerCase().includes("permission denied") || rawMessage.toLowerCase().includes("api key")) {
       return NextResponse.json(
         {
