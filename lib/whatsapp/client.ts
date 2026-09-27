@@ -1,5 +1,5 @@
 import { normalizePhoneNumber } from "./phoneUtils";
-import { isDoNotContact } from "../storage/store";
+import { getSettings, isDoNotContact } from "../storage/store";
 import type { AppSettings, Lead } from "../types";
 
 export interface WhatsAppSendResult {
@@ -121,8 +121,9 @@ export async function sendWhatsAppMessage(options: {
   templateParameters?: Array<{ type: "text"; text: string }>;
   textBody?: string;
 }): Promise<WhatsAppSendResult> {
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const settings = getSettings();
+  const accessToken = settings.whatsappAccessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId = settings.whatsappPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
 
   // 1. Provjera environment variables
   if (!accessToken || !phoneNumberId) {
@@ -131,7 +132,7 @@ export async function sendWhatsAppMessage(options: {
       status: "ERROR",
       errorCode: "NOT_CONFIGURED",
       errorMessage:
-        "WhatsApp Business API nije konfigurisan. Postavite WHATSAPP_ACCESS_TOKEN i WHATSAPP_PHONE_NUMBER_ID u .env.local ili na Vercel-u.",
+        "WhatsApp Business API nije konfigurisan. Postavite WHATSAPP_ACCESS_TOKEN i WHATSAPP_PHONE_NUMBER_ID u Postavkama ili .env.local.",
     };
   }
 

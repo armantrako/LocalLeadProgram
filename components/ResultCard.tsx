@@ -3,6 +3,7 @@
 import { useState } from "react";
 import StatusBadge from "./StatusBadge";
 import type { Lead } from "@/lib/types";
+import { normalizePhoneNumber } from "@/lib/whatsapp/phoneUtils";
 
 function scoreEmoji(score: number) {
   if (score >= 70) return "🔥";
@@ -43,6 +44,14 @@ export default function ResultCard({
   }
 
   const conversationCount = lead.conversation?.length || 0;
+  const phoneNorm = lead.phone ? normalizePhoneNumber(lead.phone) : null;
+  const isMobile = phoneNorm?.isValid && phoneNorm.type === "mobile";
+  const waDirectUrl = isMobile
+    ? `https://wa.me/${phoneNorm.e164}?text=${encodeURIComponent(
+        lead.generatedMessage ||
+          `Pozdrav, javljam se u vezi ${lead.name}. Vidio sam vaš profil na Google mapi, pa bih vam poslao kratak primjer kako bi mogla izgledati moderna web prezentacija.`
+      )}`
+    : null;
 
   return (
     <div
@@ -136,10 +145,22 @@ export default function ResultCard({
                 onClick={() => onSendWhatsApp(lead)}
                 disabled={lead.doNotContact}
                 className="text-xs bg-accent/15 hover:bg-accent border border-accent/40 text-accent hover:text-bg font-semibold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Pošalji poruku preko službenog WhatsApp API-ja"
+                title="Pošalji poruku preko službenog Meta WhatsApp API-ja"
               >
-                <span>💬</span> WhatsApp
+                <span>💬</span> WhatsApp API
               </button>
+            )}
+
+            {waDirectUrl && !lead.doNotContact && (
+              <a
+                href={waDirectUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs bg-emerald-500/15 hover:bg-emerald-500 border border-emerald-500/40 text-emerald-400 hover:text-bg font-semibold px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1"
+                title="Otvori direktno u WhatsApp aplikaciji (1-klik slanje sa porukom)"
+              >
+                <span>📲</span> Direktni WA
+              </a>
             )}
           </div>
 

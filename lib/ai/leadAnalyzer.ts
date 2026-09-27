@@ -1,4 +1,5 @@
 import type { BusinessAnalysis, Lead } from "../types";
+import { getSettings } from "../storage/store";
 
 /**
  * Detaljna analiza biznisa zasnovana isključivo na stvarnim podacima sa Google Places API-ja.
@@ -96,7 +97,8 @@ export async function analyzeLeadWithAI(lead: Lead): Promise<BusinessAnalysis> {
   const localAnalysis = analyzeLeadLocally(lead);
 
   // Provjeri da li postoji OpenAI ključ
-  const openAiKey = process.env.OPENAI_API_KEY;
+  const settings = getSettings();
+  const openAiKey = settings.openaiApiKey || process.env.OPENAI_API_KEY;
   if (!openAiKey) {
     return localAnalysis;
   }

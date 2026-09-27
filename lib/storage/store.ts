@@ -31,6 +31,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   followupDelayDays: 3,
   aiProvider: "builtin",
   aiModel: "gpt-4o-mini",
+  googleMapsApiKey: "",
+  whatsappAccessToken: "",
+  whatsappPhoneNumberId: "",
+  whatsappBusinessAccountId: "",
+  whatsappVerifyToken: "",
+  openaiApiKey: "",
 };
 
 export const DEFAULT_TEMPLATES: WhatsAppTemplate[] = [

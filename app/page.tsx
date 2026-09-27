@@ -10,6 +10,7 @@ import SettingsView from "@/components/SettingsView";
 import AuditLogView from "@/components/AuditLogView";
 import AnalysisModal from "@/components/AnalysisModal";
 import ConversationModal from "@/components/ConversationModal";
+import { normalizePhoneNumber } from "@/lib/whatsapp/phoneUtils";
 import type {
   AppSettings,
   AuditLogEntry,
@@ -255,26 +256,83 @@ export default function Home() {
     }
   }
 
-  // Akcija: Pošalji WhatsApp
+  // Akcija: Pošalji WhatsApp (Povezano direktno sa vašim WhatsAppom)
   async function handleSendWhatsApp(lead: Lead) {
     try {
-      showNotification("info", `Šaljem WhatsApp poruku za "${lead.name}"...`);
-      const res = await fetch("/api/outreach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "send", leadData: lead }),
-      });
-      const data = await res.json();
+      // 1. Ako nema generisanu poruku, generiši je
+      let msg = lead.generatedMessage;
+      let currentLead = lead;
 
-      if (!res.ok || !data.success) {
-        if (data.lead) updateLeadInState(data.lead);
-        throw new Error(data.error || "Greška pri slanju WhatsApp poruke.");
+      if (!msg) {
+        showNotification("info", `Pripremam poruku za "${lead.name}"...`);
+        const genRes = await fetch("/api/outreach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "generate-message", leadData: lead }),
+        });
+        if (genRes.ok) {
+          const genData = await genRes.json();
+          msg = genData.message;
+          if (genData.lead) {
+            currentLead = genData.lead;
+            updateLeadInState(genData.lead);
+          }
+        }
       }
 
-      updateLeadInState(data.lead);
-      showNotification("success", `✅ WhatsApp poruka uspješno poslana za "${lead.name}"!`);
+      // 2. Provjeri broj telefona
+      const phoneNorm = currentLead.phone ? normalizePhoneNumber(currentLead.phone) : null;
+      if (!phoneNorm || !phoneNorm.isValid || phoneNorm.type !== "mobile") {
+        showNotification(
+          "error",
+          `Broj telefona (${currentLead.phone || "nema"}) nije mobilni ili nema validan format za WhatsApp.`
+        );
+        return;
+      }
+
+      // 3. Ako ima podešen Meta Cloud API token, pošalji preko API-ja
+      const hasMetaApi = !!(settings?.whatsappAccessToken && settings?.whatsappPhoneNumberId);
+      if (hasMetaApi) {
+        showNotification("info", `Šaljem preko WhatsApp Business API-ja za "${currentLead.name}"...`);
+        const res = await fetch("/api/outreach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "send", leadData: currentLead }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          updateLeadInState(data.lead);
+          showNotification("success", `✅ WhatsApp poruka uspješno poslana za "${currentLead.name}"!`);
+          loadOutreachData();
+          return;
+        }
+      }
+
+      // 4. DIREKTNO OTVARANJE U VAŠEM WHATSAPP-U (wa.me)
+      const finalMsg =
+        msg ||
+        `Pozdrav, javljam se u vezi ${currentLead.name}. Vidio sam vaš profil na Google mapi, pa vam šaljem kratak prijedlog za modernu web stranicu.`;
+      const waUrl = `https://wa.me/${phoneNorm.e164}?text=${encodeURIComponent(finalMsg)}`;
+
+      window.open(waUrl, "_blank");
+
+      // Zabilježi u bazi kao poslano
+      const markRes = await fetch("/api/outreach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "mark-sent",
+          leadData: currentLead,
+          customText: finalMsg,
+        }),
+      });
+      if (markRes.ok) {
+        const markData = await markRes.json();
+        if (markData.lead) updateLeadInState(markData.lead);
+      }
+
+      showNotification("success", `🚀 Otvoren vaš WhatsApp sa pripremljenom porukom za "${currentLead.name}"!`);
       loadOutreachData();
-      loadAuditLogs();
     } catch (err) {
       showNotification("error", err instanceof Error ? err.message : "Greška pri slanju.");
     }
@@ -449,26 +507,31 @@ export default function Home() {
       )}
 
       {/* Zaglavlje aplikacije */}
-      <header className="flex flex-col gap-1.5 border-b border-border/40 pb-5">
+      <header className="flex flex-col gap-2.5 border-b border-border/40 pb-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
-              <span>⚡</span> Lead Finder & AI WhatsApp Outreach
+              <span>⚡</span> LocalLead · AI Lead Finder & WhatsApp
             </h1>
             <p className="text-muted text-xs mt-0.5">
-              Pronalazi stvarne lokalne firme sa Google Places API-ja i vodi personalizovani WhatsApp outreach agent.
+              Pronađite stvarne lokalne firme sa Google-a i pošaljite im gotovu ponudu direktno na WhatsApp.
             </p>
           </div>
 
-          {mockMode && (
-            <span className="text-xs px-2.5 py-1 rounded-full border border-yellow-500/40 text-yellow-400 bg-yellow-500/10 font-medium">
-              MOCK MODE (Lokalni demo)
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] px-2.5 py-1 rounded-full border border-emerald-500/40 text-emerald-400 bg-emerald-500/10 font-medium flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Google Places API: Povezan
             </span>
-          )}
+            <span className="text-[11px] px-2.5 py-1 rounded-full border border-emerald-500/40 text-emerald-400 bg-emerald-500/10 font-medium flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              WhatsApp: Povezan (Tvoj WhatsApp)
+            </span>
+          </div>
         </div>
 
         {/* Tab navigacija */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-4">
+        <div className="flex flex-wrap items-center gap-2 pt-3">
           <button
             onClick={() => setActiveTab("finder")}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
@@ -477,7 +540,7 @@ export default function Home() {
                 : "bg-surface hover:bg-surfaceHover text-muted hover:text-white border border-border"
             }`}
           >
-            <span>🔍</span> Pronađi leadove
+            <span>🔍</span> 1. Pronađi firme
           </button>
 
           <button
@@ -491,7 +554,7 @@ export default function Home() {
                 : "bg-surface hover:bg-surfaceHover text-muted hover:text-white border border-border"
             }`}
           >
-            <span>📱</span> WhatsApp Outreach
+            <span>💬</span> 2. Poslane poruke & Klijenti
             {outreachLeads.length > 0 && (
               <span
                 className={`text-[10px] px-1.5 py-0.2 rounded-full ${
@@ -513,7 +576,7 @@ export default function Home() {
                 : "bg-surface hover:bg-surfaceHover text-muted hover:text-white border border-border"
             }`}
           >
-            <span>⚙️</span> Postavke & AI
+            <span>⚙️</span> 3. Moje postavke (Ime, cijene, poruka)
           </button>
 
           <button
@@ -521,32 +584,37 @@ export default function Home() {
               setActiveTab("audit");
               loadAuditLogs();
             }}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+            className={`px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ml-auto ${
               activeTab === "audit"
-                ? "bg-accent text-bg shadow-md shadow-accent/20"
-                : "bg-surface hover:bg-surfaceHover text-muted hover:text-white border border-border"
+                ? "bg-surface border border-accent text-accent"
+                : "text-muted/60 hover:text-muted"
             }`}
           >
-            <span>📜</span> Audit Dnevnik
+            <span>📜</span> Historija
           </button>
         </div>
       </header>
 
-      {/* Auto Outreach Banner & Metrike */}
-      {settings && (
-        <AutoOutreachBanner
-          settings={settings}
-          onToggleAuto={handleToggleAuto}
-          onRunQueue={handleRunQueue}
-          isRunningQueue={isRunningQueue}
-        />
-      )}
-
-      <OutreachMetrics stats={stats} />
-
-      {/* TAB 1: PRONAĐI LEADOVE (POSTOJEĆI LEAD FINDER) */}
+      {/* TAB 1: PRONAĐI FIRME (LEAD FINDER) */}
       {activeTab === "finder" && (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-5">
+          {/* Jednostavan vodič u 3 koraka */}
+          <div className="bg-surface/80 border border-border rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white bg-accent/20 text-accent px-2 py-0.5 rounded">1</span>
+              <span>Upiši grad i kategoriju</span>
+            </div>
+            <span className="text-muted/40 hidden sm:inline">➔</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white bg-accent/20 text-accent px-2 py-0.5 rounded">2</span>
+              <span>Klikni "Pronađi firme"</span>
+            </div>
+            <span className="text-muted/40 hidden sm:inline">➔</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">3</span>
+              <span>Klikni <strong>"💬 WhatsApp"</strong> i poruka se odmah otvara u WhatsAppu!</span>
+            </div>
+          </div>
           <FilterForm
             value={params}
             onChange={setParams}
@@ -589,15 +657,28 @@ export default function Home() {
 
       {/* TAB 2: WHATSAPP OUTREACH TAB */}
       {activeTab === "outreach" && (
-        <OutreachTable
-          leads={outreachLeads}
-          onAnalyze={handleAnalyze}
-          onGenerateMessage={handleGenerateMessage}
-          onSendWhatsApp={handleSendWhatsApp}
-          onViewConversation={(lead) => setConversationModalLead(lead)}
-          onScheduleFollowup={handleScheduleFollowup}
-          onDoNotContact={handleDoNotContact}
-        />
+        <div className="flex flex-col gap-6">
+          {settings && (
+            <AutoOutreachBanner
+              settings={settings}
+              onToggleAuto={handleToggleAuto}
+              onRunQueue={handleRunQueue}
+              isRunningQueue={isRunningQueue}
+            />
+          )}
+
+          <OutreachMetrics stats={stats} />
+
+          <OutreachTable
+            leads={outreachLeads}
+            onAnalyze={handleAnalyze}
+            onGenerateMessage={handleGenerateMessage}
+            onSendWhatsApp={handleSendWhatsApp}
+            onViewConversation={(lead) => setConversationModalLead(lead)}
+            onScheduleFollowup={handleScheduleFollowup}
+            onDoNotContact={handleDoNotContact}
+          />
+        </div>
       )}
 
       {/* TAB 3: POSTAVKE & AI */}

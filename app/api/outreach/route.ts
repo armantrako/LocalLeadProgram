@@ -304,6 +304,57 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 4b. DIRECT WHATSAPP SENT (Otvoreno i poslano direktno preko WhatsAppa)
+    if (action === "mark-sent") {
+      let lead = leadId ? getLeadById(leadId) : null;
+      if (!lead && leadData) {
+        lead = saveLead(leadData);
+      }
+      if (!lead) {
+        return NextResponse.json({ error: "Lead nije pronađen." }, { status: 404 });
+      }
+
+      const textToSend = customText || lead.generatedMessage || "Pozdrav, javio sam se u vezi vaše web stranice.";
+      const newMsg: OutreachMessage = {
+        id: `msg-${Date.now()}`,
+        leadId: lead.id,
+        direction: "outgoing",
+        text: textToSend,
+        status: "sent",
+        timestamp: new Date().toISOString(),
+      };
+
+      lead.conversation = [...(lead.conversation || []), newMsg];
+      lead.status = "SENT";
+      lead.lastContactAt = new Date().toISOString();
+      lead.lastError = null;
+
+      const followupNum = (lead.followupCount || 0) + 1;
+      if (followupNum < settings.maxFollowups) {
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + settings.followupDelayDays);
+        lead.nextFollowupAt = nextDate.toISOString();
+        lead.followupCount = followupNum;
+      } else {
+        lead.nextFollowupAt = null;
+        lead.followupCount = followupNum;
+      }
+
+      const updated = saveLead(lead);
+
+      logAuditEvent({
+        leadId: lead.id,
+        businessName: lead.name,
+        action: "WHATSAPP_SENT",
+        status: "success",
+        channel: "whatsapp",
+        source: "manual",
+        details: "Poruka poslana direktno preko WhatsApp aplikacije",
+      });
+
+      return NextResponse.json({ success: true, lead: updated });
+    }
+
     // 5. DO NOT CONTACT
     if (action === "dnc") {
       let lead = leadId ? getLeadById(leadId) : null;

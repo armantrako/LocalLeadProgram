@@ -98,6 +98,14 @@ export interface AppSettings {
   // AI Provider
   aiProvider: "builtin" | "openai" | "gemini";
   aiModel: string;
+
+  // API Keys (UI Configuration & Overrides)
+  googleMapsApiKey?: string;
+  whatsappAccessToken?: string;
+  whatsappPhoneNumberId?: string;
+  whatsappBusinessAccountId?: string;
+  whatsappVerifyToken?: string;
+  openaiApiKey?: string;
 }
 
 export type AuditAction =

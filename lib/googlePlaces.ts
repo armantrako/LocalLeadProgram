@@ -8,6 +8,7 @@ import {
   type ResolvedCity,
 } from "./geoValidation";
 import type { Lead, LeadsFetchResult, SearchParamsInput } from "./types";
+import { getSettings } from "./storage/store";
 
 const FIELD_MASK = [
   "places.id",
@@ -237,10 +238,11 @@ async function fetchPagesForVariation(
 export async function fetchLeadsFromGoogle(
   params: SearchParamsInput
 ): Promise<LeadsFetchResult> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const settings = getSettings();
+  const apiKey = settings.googleMapsApiKey || process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey || apiKey.trim() === "") {
     throw new Error(
-      "Google Places API ključ nije podešen. Postavite GOOGLE_MAPS_API_KEY u environment variables."
+      "Google Places API ključ nije podešen. Postavite GOOGLE_MAPS_API_KEY u Postavkama ili environment variables."
     );
   }
 

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import StatusBadge from "./StatusBadge";
 import type { Lead, LeadStatus } from "@/lib/types";
+import { normalizePhoneNumber } from "@/lib/whatsapp/phoneUtils";
 
 interface Props {
   leads: Lead[];
